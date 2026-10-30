@@ -1,0 +1,25 @@
+name: mirroring
+description: "Ứng dụng điều khiển và phản chiếu màn hình điện thoại Android không dây trên Windows qua ADB và scrcpy."
+publish_to: 'none'
+
+version: 1.0.1+1
+
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  ffi: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/app_icon.jpg
+    - pubspec.yaml

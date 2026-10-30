@@ -1,0 +1,32 @@
+scrcpy Notice of Modification
+==============================
+
+This directory contains scrcpy (version 5.0.1) binaries, licensed under the
+Apache License, Version 2.0 (see LICENSE.txt).
+
+Copyright (C) 2018 Genymobile
+Copyright (C) 2018-2026 Romain Vimont
+Project Home: https://github.com/Genymobile/scrcpy
+
+Pursuant to Section 4(b) of the Apache License 2.0, notice is hereby given
+that the following files have been modified for the Mirroring application:
+
+1. `scrcpy.png`:
+   Replaced with the Mirroring application logo to match the application's
+   visual branding (Original artwork by Duy Hưng / duyhungpham94,
+   source: https://www.pinterest.com/pin/958211258215792168/).
+
+2. `scrcpy.exe`:
+   The embedded Windows PE resource icon (RT_GROUP_ICON) has been updated with
+   the Mirroring application icon for visual consistency in the taskbar and
+   window caption.
+
+All other scrcpy binaries (including scrcpy-server) and source logic remain
+unmodified and are provided under the Apache License 2.0.
+
+Additional Bundled Components:
+- Android Debug Bridge (ADB): Copyright (C) Android Open Source Project, Google LLC (Apache-2.0).
+- FFmpeg (avcodec, avformat, avutil, swresample): Copyright (C) FFmpeg developers (LGPL v2.1 or later). Source: https://ffmpeg.org
+- SDL3: Copyright (C) Sam Lantinga (zlib License). Source: https://www.libsdl.org
+- libusb: Copyright (C) libusb developers (LGPL v2.1 or later). Source: https://libusb.info
+
