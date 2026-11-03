@@ -34,6 +34,7 @@
 - [11. Cấu trúc dự án](#11-cấu-trúc-dự-án)
 - [12. Đóng góp cho dự án](#12-đóng-góp-cho-dự-án)
 - [13. Giấy phép](#13-giấy-phép)
+- [14. Tuyên bố miễn trừ trách nhiệm & Khuyến cáo bảo mật](#14-tuyên-bố-miễn-trừ-trách-nhiệm--khuyến-cáo-bảo-mật)
 
 ---
 
@@ -110,6 +111,9 @@ Phần này dành cho người dùng thông thường muốn sử dụng ứng d
 ### Bước 1: Chuẩn bị thiết bị Android
 
 1. Đảm bảo cả **điện thoại Android** và **máy tính Windows** đang kết nối vào **cùng một mạng Wi-Fi** (cùng lớp mạng nội bộ).
+> [!IMPORTANT]
+> **Cảnh báo an toàn mạng nội bộ (Luật An toàn thông tin mạng 86/2015/QH13):**  
+> Phản chiếu màn hình qua ADB Wi-Fi truyền tải hình ảnh giao diện điện thoại trong mạng nội bộ (có thể chứa thông tin riêng tư, tin nhắn). Khuyến cáo người dùng chỉ bật Wireless Debugging trên mạng Wi-Fi gia đình/nội bộ đáng tin cậy, tránh dùng trên Wi-Fi công cộng.
 2. **Bật Tùy chọn cho nhà phát triển (Developer Options):**
    - Trên điện thoại, vào **Cài đặt (Settings)** > **Giới thiệu về điện thoại (About Phone)** > **Thông tin phần mềm**.
    - Chạm liên tục **7 lần** vào dòng **Số hiệu bản dựng (Build Number)** cho đến khi màn hình hiển thị thông báo *"Bạn đã là nhà phát triển"*.
@@ -396,7 +400,7 @@ Mã nguồn của dự án **Mirroring** được phát hành theo giấy phép 
 ### 14.1. Miễn trừ trách nhiệm bảo hành & rủi ro kỹ thuật
 Ứng dụng **Mirroring** được cung cấp theo nguyên tắc "AS IS" (nguyên trạng), hoàn toàn miễn phí theo giấy phép MIT. Tác giả không chịu trách nhiệm đối với bất kỳ rủi ro, tổn thất dữ liệu, hư hỏng thiết bị hay gián đoạn dịch vụ nào phát sinh từ việc sử dụng ứng dụng hoặc các công cụ bên thứ ba đi kèm (ADB, scrcpy).
 
-### 14.2. Khuyến cáo an toàn khi sử dụng Wireless Debugging
-- **Bảo mật mạng Wi-Fi:** Chỉ nên kích hoạt tính năng Gỡ lỗi không dây (Wireless Debugging) trên mạng Wi-Fi gia đình hoặc mạng nội bộ đáng tin cậy. **Tuyệt đối không bật trên mạng Wi-Fi công cộng** (quán cà phê, sân bay, khách sạn...) vì các thiết bị lạ trong cùng mạng có thể dò quét và gửi lệnh ADB tới điện thoại của bạn.
+### 14.2. Khuyến cáo an toàn khi sử dụng Wireless Debugging (Cảnh báo an toàn mạng nội bộ)
+- **Bảo mật mạng Wi-Fi & Quyền riêng tư (Luật An toàn thông tin mạng 86/2015/QH13):** Phản chiếu màn hình qua ADB Wi-Fi truyền tải hình ảnh giao diện điện thoại (có thể chứa thông tin riêng tư, tin nhắn). Khuyến cáo người dùng chỉ bật Wireless Debugging trên mạng Wi-Fi gia đình/nội bộ đáng tin cậy, tránh dùng trên Wi-Fi công cộng để phòng ngừa các thiết bị lạ trong cùng mạng dò quét và bảo vệ an toàn thông tin cá nhân.
 - **Xác nhận khóa RSA:** Luôn kiểm tra kỹ hộp thoại xác thực khóa RSA xuất hiện trên màn hình điện thoại trước khi bấm "Cho phép". Chỉ cho phép khi chính bạn vừa bấm nút kết nối từ máy tính của mình.
 - **Tắt khi không sử dụng:** Sau khi hoàn thành phiên làm việc, bạn nên tắt tính năng Wireless Debugging trong menu Tùy chọn nhà phát triển (Developer Options) trên điện thoại để tiết kiệm pin và đảm bảo an toàn tối đa.
