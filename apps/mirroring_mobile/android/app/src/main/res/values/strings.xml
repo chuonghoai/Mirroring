@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_label">Mirroring Remote Control</string>
+    <string name="accessibility_service_description">Cho phép Mirroring thực hiện thao tác chạm, vuốt, quay lại, về màn hình chính và nhập văn bản từ máy tính Windows trong phiên phản chiếu màn hình đã được bạn chấp nhận.</string>
+</resources>

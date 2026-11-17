@@ -62,7 +62,9 @@ class LanDiscoveryService {
       );
       _isRunning = true;
     } catch (e) {
-      debugPrint('Failed to bind UDP port ${MirroringProtocolConstants.discoveryPort}: $e');
+      debugPrint(
+        'Failed to bind UDP port ${MirroringProtocolConstants.discoveryPort}: $e',
+      );
       // Fallback ephemeral socket for sending beacons if port is already occupied
       try {
         _socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
@@ -87,21 +89,58 @@ class LanDiscoveryService {
     final id = _localDeviceId;
     if (socket == null || id == null) return;
 
-    final beacon = DiscoveryBeacon(
-      deviceId: id,
-      deviceName: WindowsDeviceIdentity.getHostName(),
-      deviceType: MirrorDeviceType.windowsHost,
-      controlPort: 0,
-      availability: availabilityProvider(),
-      timestampMs: DateTime.now().millisecondsSinceEpoch,
-    );
-    final bytes = utf8.encode(beacon.toJsonString());
+    final bytes = _buildBeaconBytes(id);
+    final peerIps = _devices.values.map((d) => d.ipAddress).toSet();
+    final lanAddrs = await _getLanInterfaceAddresses();
 
-    final targets = await _resolveBroadcastTargets();
-    for (final target in targets) {
+    var sentViaInterface = false;
+    for (final localAddr in lanAddrs) {
+      final parts = localAddr.address.split('.');
+      if (parts.length != 4) continue;
+      final directedBroadcast = InternetAddress(
+        '${parts[0]}.${parts[1]}.${parts[2]}.255',
+      );
+
+      RawDatagramSocket? ifaceSocket;
       try {
-        socket.send(bytes, target, MirroringProtocolConstants.discoveryPort);
-      } catch (_) {}
+        // Bind directly to the physical LAN IPv4 interface so VPN/WARP virtual
+        // adapters do not hijack 255.255.255.255 or subnet broadcasts.
+        ifaceSocket = await RawDatagramSocket.bind(localAddr, 0);
+        ifaceSocket.broadcastEnabled = true;
+        ifaceSocket.send(
+          bytes,
+          directedBroadcast,
+          MirroringProtocolConstants.discoveryPort,
+        );
+        ifaceSocket.send(
+          bytes,
+          InternetAddress('255.255.255.255'),
+          MirroringProtocolConstants.discoveryPort,
+        );
+        for (final peerIp in peerIps) {
+          ifaceSocket.send(
+            bytes,
+            InternetAddress(peerIp),
+            MirroringProtocolConstants.discoveryPort,
+          );
+        }
+        sentViaInterface = true;
+      } catch (_) {
+      } finally {
+        ifaceSocket?.close();
+      }
+    }
+
+    if (!sentViaInterface) {
+      final targets = <InternetAddress>[
+        InternetAddress('255.255.255.255'),
+        ...peerIps.map(InternetAddress.new),
+      ];
+      for (final target in targets) {
+        try {
+          socket.send(bytes, target, MirroringProtocolConstants.discoveryPort);
+        } catch (_) {}
+      }
     }
   }
 
@@ -149,8 +188,47 @@ class LanDiscoveryService {
     _devices[beacon.deviceId] = updated;
     if (changed) {
       _emitDevices();
+      if (_isRunning) {
+        unawaited(_sendBeaconUnicast(senderIp));
+      }
     }
     return true;
+  }
+
+  Future<void> _sendBeaconUnicast(String targetIp) async {
+    final id = _localDeviceId;
+    if (!_isRunning || id == null) return;
+    final bytes = _buildBeaconBytes(id);
+    final lanAddrs = await _getLanInterfaceAddresses();
+    final target = InternetAddress(targetIp);
+
+    for (final localAddr in lanAddrs) {
+      RawDatagramSocket? ifaceSocket;
+      try {
+        ifaceSocket = await RawDatagramSocket.bind(localAddr, 0);
+        ifaceSocket.send(bytes, target, MirroringProtocolConstants.discoveryPort);
+        return;
+      } catch (_) {
+      } finally {
+        ifaceSocket?.close();
+      }
+    }
+
+    try {
+      _socket?.send(bytes, target, MirroringProtocolConstants.discoveryPort);
+    } catch (_) {}
+  }
+
+  List<int> _buildBeaconBytes(String deviceId) {
+    final beacon = DiscoveryBeacon(
+      deviceId: deviceId,
+      deviceName: WindowsDeviceIdentity.getHostName(),
+      deviceType: MirrorDeviceType.windowsHost,
+      controlPort: 0,
+      availability: availabilityProvider(),
+      timestampMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    return utf8.encode(beacon.toJsonString());
   }
 
   /// Removes devices that have not sent a beacon within [offlineTimeout].
@@ -188,26 +266,53 @@ class LanDiscoveryService {
     _emitDevices();
   }
 
-  Future<List<InternetAddress>> _resolveBroadcastTargets() async {
-    final targets = <String, InternetAddress>{
-      '255.255.255.255': InternetAddress('255.255.255.255'),
-    };
+  Future<List<InternetAddress>> _getLanInterfaceAddresses() async {
+    final candidates = <InternetAddress>[];
     try {
       final interfaces = await NetworkInterface.list(
         type: InternetAddressType.IPv4,
         includeLoopback: false,
       );
       for (final iface in interfaces) {
+        final nameLower = iface.name.toLowerCase();
+        if (_isVirtualOrTunnelInterface(nameLower)) continue;
         for (final addr in iface.addresses) {
-          final parts = addr.address.split('.');
-          if (parts.length == 4) {
-            final directed = '${parts[0]}.${parts[1]}.${parts[2]}.255';
-            targets[directed] = InternetAddress(directed);
+          if (_isUsableLanIpv4(addr.address)) {
+            candidates.add(addr);
           }
         }
       }
     } catch (_) {}
-    return targets.values.toList();
+    return candidates;
+  }
+
+  static bool _isVirtualOrTunnelInterface(String nameLower) {
+    return nameLower.contains('warp') ||
+        nameLower.contains('cloudflare') ||
+        nameLower.contains('tun') ||
+        nameLower.contains('tap') ||
+        nameLower.contains('wireguard') ||
+        nameLower.contains('tailscale') ||
+        nameLower.contains('zerotier') ||
+        nameLower.contains('vethernet') ||
+        nameLower.contains('wsl') ||
+        nameLower.contains('virtualbox') ||
+        nameLower.contains('vmware') ||
+        nameLower.contains('hyper-v');
+  }
+
+  static bool _isUsableLanIpv4(String ip) {
+    if (ip.startsWith('127.') || ip.startsWith('169.254.')) return false;
+    if (ip.startsWith('192.168.') || ip.startsWith('10.')) return true;
+    final parts = ip.split('.');
+    if (parts.length == 4 && parts[0] == '172') {
+      final second = int.tryParse(parts[1]) ?? -1;
+      // 172.16.0.2 is often used by Cloudflare WARP / VPNs; allow RFC1918 172.16-31
+      // except 172.16.0.2 single-host WARP endpoint.
+      if (ip == '172.16.0.2') return false;
+      return second >= 16 && second <= 31;
+    }
+    return false;
   }
 
   void _emitDevices() {

@@ -136,7 +136,7 @@ cd ..\mirroring_mobile; flutter test
 2. **Force Stop & Khởi động lại:** Nếu bạn vào Cài đặt hệ thống bấm **Buộc dừng (Force Stop)** hoặc khởi động lại máy, Android sẽ chấm dứt mọi dịch vụ và phiên chia sẻ kết thúc theo đúng quy định hệ điều hành.
 3. **Tối ưu pin OEM:** Một số hãng (Xiaomi, Oppo, Vivo) có thể chặn dịch vụ nền nếu bật giới hạn pin nghiêm ngặt; nên đặt ứng dụng ở mức *Không hạn chế* hoặc *Tối ưu hóa* nếu bị ngắt bất thường.
 4. **Quyền MediaProjection theo từng phiên:** Android không cho phép lưu vĩnh viễn quyền ghi màn hình cho các phiên sau; mỗi lần kết nối mới người dùng đều cần xác nhận trên hộp thoại hệ thống.
-5. **Điều khiển cảm ứng/bàn phím từ xa:** `MediaProjection` chỉ cấp quyền đọc hình ảnh màn hình, không cho phép ứng dụng thường giả lập thao tác chạm vào ứng dụng khác. Trong chế độ **LAN Không dây**, bạn có thể xem màn hình và gửi Clipboard từ Windows sang Android. Nếu cần điều khiển chuột/bàn phím trực tiếp, hãy chuyển sang tab **ADB & scrcpy** (sử dụng Wireless Debugging).
+5. **Điều khiển cảm ứng & bàn phím qua mạng LAN (v2.0.0):** `MediaProjection` chỉ đọc hình ảnh màn hình. Để điều khiển chạm, vuốt, cuộn, Back/Home/Recents và gõ chữ trên Windows qua LAN **không cần ADB**, hãy bật dịch vụ **Mirroring Remote Control** trong *Cài đặt > Hỗ trợ (Trợ năng / Accessibility) > Dịch vụ đã cài đặt* trên điện thoại (hoặc bấm nút **Bật ngay** ngay trong app Mirroring Android). Tab **ADB & scrcpy** vẫn được giữ nguyên làm chế độ nâng cao dự phòng.
 
 ---
 

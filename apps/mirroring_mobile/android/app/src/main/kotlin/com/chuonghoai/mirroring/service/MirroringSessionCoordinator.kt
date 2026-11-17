@@ -189,8 +189,27 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
             } else {
                 0
             },
+            "accessibilityEnabled" to (ctx?.let { MirroringAccessibilityService.isServiceEnabled(it) } ?: false),
             "statusMessage" to lastStatusMessage,
         )
+    }
+
+    fun onAccessibilityStateChanged(enabled: Boolean) {
+        val tok = activeSessionToken
+        val client = activeClient
+        if (tok != null && client != null && sessionState == CompanionSessionState.STREAMING) {
+            client.sendJson(
+                buildControlJson(
+                    "accessibilityStatus",
+                    JSONObject().apply {
+                        put("sessionToken", tok)
+                        put("enabled", enabled)
+                    },
+                ),
+            )
+        }
+        emitLog("info", if (enabled) "Đã bật dịch vụ Điều khiển từ xa (Accessibility)" else "Dịch vụ Điều khiển từ xa đã tắt")
+        notifyObservers()
     }
 
     /**
@@ -349,8 +368,8 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
                 context = ctx,
                 mediaProjection = projection,
                 maxDimension = 1280,
-                targetFps = 30,
-                bitrate = 4_000_000,
+                targetFps = 60,
+                bitrate = 6_000_000,
                 listener = object : ScreenCaptureEncoder.Listener {
                     override fun onVideoFrame(
                         frameType: Int,
@@ -496,7 +515,7 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
         }
 
         if (notifyPeer && clientToNotify != null && tokenToNotify != null) {
-            clientToNotify.sendJson(
+            clientToNotify.sendJsonAndClose(
                 buildControlJson(
                     "sessionStop",
                     JSONObject().apply {
@@ -505,6 +524,11 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
                     },
                 ),
             )
+        } else {
+            try {
+                clientToNotify?.close()
+            } catch (_: Throwable) {
+            }
         }
 
         try {
@@ -518,11 +542,6 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
         } catch (_: Throwable) {
         }
         streamServer = null
-
-        try {
-            clientToNotify?.close()
-        } catch (_: Throwable) {
-        }
 
         serviceToStop?.stopServiceCleanly()
         emitLog("info", "Session ended: $reason")
@@ -547,6 +566,9 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
             "heartbeat" -> handleHeartbeat(client, payload)
             "sessionStop" -> handleSessionStop(client, payload)
             "clipboardPush" -> handleClipboardPush(client, payload)
+            "inputGesture" -> handleInputGesture(client, payload)
+            "inputAction" -> handleInputAction(client, payload)
+            "inputText" -> handleInputText(client, payload)
             else -> {
                 client.sendJson(
                     buildControlJson(
@@ -678,6 +700,7 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
 
         activeService?.updateNotification(isReconnecting = false, windowsName = winName)
 
+        val accEnabled = appContext?.let { MirroringAccessibilityService.isServiceEnabled(it) } ?: false
         client.sendJson(
             buildControlJson(
                 "sessionAck",
@@ -687,6 +710,7 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
                     put("height", currentHeight)
                     put("rotation", currentRotation)
                     put("streamPort", streamServer?.listeningPort ?: 0)
+                    put("accessibilityEnabled", accEnabled)
                 },
             ),
         )
@@ -762,6 +786,77 @@ object MirroringSessionCoordinator : ControlWebSocketServer.Listener {
                 emitLog("warn", "Could not update clipboard: ${t.message}")
             }
         }
+    }
+
+    private fun handleInputGesture(client: ControlWebSocketServer.ClientSession, payload: JSONObject) {
+        val token = payload.optString("sessionToken")
+        if (!isAuthorizedToken(token)) {
+            sendUnauthorizedError(client)
+            return
+        }
+        val acc = MirroringAccessibilityService.instance
+        if (acc == null) {
+            sendAccessibilityMissingError(client, token)
+            return
+        }
+        val arr = payload.optJSONArray("points") ?: return
+        val points = mutableListOf<Pair<Float, Float>>()
+        for (i in 0 until arr.length()) {
+            val pt = arr.optJSONObject(i) ?: continue
+            val x = pt.optDouble("x", Double.NaN).toFloat()
+            val y = pt.optDouble("y", Double.NaN).toFloat()
+            if (!x.isNaN() && !y.isNaN()) {
+                points.add(x to y)
+            }
+        }
+        val durationMs = payload.optLong("durationMs", 45L)
+        acc.performTouchGesture(points, durationMs)
+    }
+
+    private fun handleInputAction(client: ControlWebSocketServer.ClientSession, payload: JSONObject) {
+        val token = payload.optString("sessionToken")
+        if (!isAuthorizedToken(token)) {
+            sendUnauthorizedError(client)
+            return
+        }
+        val acc = MirroringAccessibilityService.instance
+        if (acc == null) {
+            sendAccessibilityMissingError(client, token)
+            return
+        }
+        val action = payload.optString("action")
+        if (action.isNotBlank()) {
+            acc.performNavigationAction(action)
+        }
+    }
+
+    private fun handleInputText(client: ControlWebSocketServer.ClientSession, payload: JSONObject) {
+        val token = payload.optString("sessionToken")
+        if (!isAuthorizedToken(token)) {
+            sendUnauthorizedError(client)
+            return
+        }
+        val acc = MirroringAccessibilityService.instance
+        if (acc == null) {
+            sendAccessibilityMissingError(client, token)
+            return
+        }
+        val text = payload.optString("text", "")
+        if (text.isNotEmpty()) {
+            acc.inputTextOnFocusedNode(text)
+        }
+    }
+
+    private fun sendAccessibilityMissingError(client: ControlWebSocketServer.ClientSession, token: String) {
+        client.sendJson(
+            buildControlJson(
+                "accessibilityStatus",
+                JSONObject().apply {
+                    put("sessionToken", token)
+                    put("enabled", false)
+                },
+            ),
+        )
     }
 
     private fun expirePendingRequest(requestId: String) {

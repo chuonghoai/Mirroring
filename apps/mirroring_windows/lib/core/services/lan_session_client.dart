@@ -15,6 +15,7 @@ class LanSessionUpdate {
   final int streamHeight;
   final int rotationQuarterTurns;
   final int fps;
+  final bool accessibilityEnabled;
   final String? errorMessage;
   final String? statusMessage;
 
@@ -26,6 +27,7 @@ class LanSessionUpdate {
     this.streamHeight = 0,
     this.rotationQuarterTurns = 0,
     this.fps = 0,
+    this.accessibilityEnabled = false,
     this.errorMessage,
     this.statusMessage,
   });
@@ -44,6 +46,9 @@ class LanSessionClient {
   Timer? _pairTimeoutTimer;
   Timer? _heartbeatTimer;
   Timer? _fpsTimer;
+  Timer? _nativeStatsTimer;
+  int _lastNativeDecodedFrames = 0;
+  DateTime? _lastFpsSampleAt;
 
   DiscoveredDevice? _targetDevice;
   String? _activeRequestId;
@@ -60,6 +65,7 @@ class LanSessionClient {
   int _rotation = 0;
   int _framesInCurrentSecond = 0;
   int _currentFps = 0;
+  bool _accessibilityEnabled = false;
   WindowsDeviceStatus _status = WindowsDeviceStatus.disconnected;
 
   Future<void> _decodeQueue = Future<void>.value();
@@ -182,6 +188,61 @@ class LanSessionClient {
     }
   }
 
+  bool sendTouchGesture({
+    required List<Map<String, double>> points,
+    required int durationMs,
+  }) {
+    final ws = _controlWs;
+    final token = _sessionToken;
+    if (ws == null || token == null || points.isEmpty) return false;
+    try {
+      ws.add(
+        ControlMessage.inputGesture(
+          sessionToken: token,
+          points: points,
+          durationMs: durationMs,
+        ).toJsonString(),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool sendInputAction(String action) {
+    final ws = _controlWs;
+    final token = _sessionToken;
+    if (ws == null || token == null || action.isEmpty) return false;
+    try {
+      ws.add(
+        ControlMessage.inputAction(
+          sessionToken: token,
+          action: action,
+        ).toJsonString(),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool sendInputText(String text) {
+    final ws = _controlWs;
+    final token = _sessionToken;
+    if (ws == null || token == null || text.isEmpty) return false;
+    try {
+      ws.add(
+        ControlMessage.inputText(
+          sessionToken: token,
+          text: text,
+        ).toJsonString(),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> stopSession({
     required String reason,
     bool notifyPeer = true,
@@ -196,6 +257,10 @@ class LanSessionClient {
     _heartbeatTimer = null;
     _fpsTimer?.cancel();
     _fpsTimer = null;
+    _nativeStatsTimer?.cancel();
+    _nativeStatsTimer = null;
+    _lastNativeDecodedFrames = 0;
+    _lastFpsSampleAt = null;
 
     final ws = _controlWs;
     final token = _sessionToken;
@@ -227,6 +292,7 @@ class LanSessionClient {
     _frameParser.reset();
 
     try {
+      await _decoder.stopNativeStream();
       await _decoder.resetDecoder();
     } catch (_) {}
 
@@ -263,6 +329,16 @@ class LanSessionClient {
         break;
       case ControlMessageType.streamConfig:
         _handleStreamConfig(msg.payload);
+        break;
+      case ControlMessageType.accessibilityStatus:
+        final enabled = (msg.payload['enabled'] as bool?) ?? false;
+        _accessibilityEnabled = enabled;
+        _emit(
+          status: _status,
+          statusMessage: enabled
+              ? 'Điều khiển từ xa trên Android đã sẵn sàng'
+              : 'Chưa bật Mirroring Remote Control trong Trợ năng Android',
+        );
         break;
       case ControlMessageType.sessionStop:
         final reason =
@@ -336,68 +412,89 @@ class LanSessionClient {
     try {
       _textureId ??= await _decoder.createTexture();
 
-      final socket = await Socket.connect(
-        device.ipAddress,
-        port,
-        timeout: const Duration(seconds: 6),
-      );
-      socket.setOption(SocketOption.tcpNoDelay, true);
-      _streamSocket = socket;
-      _frameParser.reset();
+      if (_decoder.supportsNativeStream) {
+        final started = await _decoder.startNativeStream(
+          host: device.ipAddress,
+          port: port,
+          sessionToken: token,
+        );
+        if (!started) {
+          _handleUnexpectedDrop('Không thể khởi động luồng giải mã video C++');
+          return;
+        }
+        _emit(
+          status: WindowsDeviceStatus.connected,
+          statusMessage: 'Đã kết nối luồng video tốc độ cao, đang chờ khung hình...',
+        );
+        _startNativeStatsPolling();
+      } else {
+        final socket = await Socket.connect(
+          device.ipAddress,
+          port,
+          timeout: const Duration(seconds: 6),
+        );
+        socket.setOption(SocketOption.tcpNoDelay, true);
+        _streamSocket = socket;
+        _frameParser.reset();
 
-      // Send token handshake line
-      socket.write('${jsonEncode({'sessionToken': token})}\n');
-      await socket.flush();
+        // Send token handshake line
+        socket.write('${jsonEncode({'sessionToken': token})}\n');
+        await socket.flush();
 
-      var handshakeCompleted = false;
-      final lineBuf = <int>[];
+        var handshakeCompleted = false;
+        final lineBuf = <int>[];
 
-      _streamSub?.cancel();
-      _streamSub = socket.listen(
-        (Uint8List chunk) {
-          if (!handshakeCompleted) {
-            for (var i = 0; i < chunk.length; i++) {
-              final b = chunk[i];
-              if (b == 10) {
-                // '\n'
-                final line = utf8.decode(lineBuf, allowMalformed: true).trim();
-                lineBuf.clear();
-                final parsed = _tryParseJsonMap(line);
-                if (parsed?['accepted'] != true) {
-                  _handleUnexpectedDrop('Xác thực luồng video bị từ chối');
-                  return;
+        _streamSub?.cancel();
+        _streamSub = socket.listen(
+          (Uint8List chunk) {
+            if (!handshakeCompleted) {
+              for (var i = 0; i < chunk.length; i++) {
+                final b = chunk[i];
+                if (b == 10) {
+                  // '\n'
+                  final line = utf8.decode(lineBuf, allowMalformed: true).trim();
+                  lineBuf.clear();
+                  final parsed = _tryParseJsonMap(line);
+                  if (parsed?['accepted'] != true) {
+                    _handleUnexpectedDrop('Xác thực luồng video bị từ chối');
+                    return;
+                  }
+                  handshakeCompleted = true;
+                  _emit(
+                    status: WindowsDeviceStatus.connected,
+                    statusMessage:
+                        'Đã kết nối luồng video, đang chờ khung hình...',
+                  );
+                  if (i + 1 < chunk.length) {
+                    _processStreamBytes(Uint8List.sublistView(chunk, i + 1));
+                  }
+                  break;
+                } else if (b != 13) {
+                  lineBuf.add(b);
                 }
-                handshakeCompleted = true;
-                _emit(
-                  status: WindowsDeviceStatus.connected,
-                  statusMessage: 'Đã kết nối luồng video, đang chờ khung hình...',
-                );
-                if (i + 1 < chunk.length) {
-                  _processStreamBytes(Uint8List.sublistView(chunk, i + 1));
-                }
-                break;
-              } else if (b != 13) {
-                lineBuf.add(b);
               }
+              return;
             }
-            return;
-          }
-          _processStreamBytes(chunk);
-        },
-        onError: (Object err) => _handleUnexpectedDrop('Lỗi luồng video: $err'),
-        onDone: () => _handleUnexpectedDrop('Luồng video đã ngắt'),
-      );
+            _processStreamBytes(chunk);
+          },
+          onError: (Object err) =>
+              _handleUnexpectedDrop('Lỗi luồng video: $err'),
+          onDone: () => _handleUnexpectedDrop('Luồng video đã ngắt'),
+        );
+        _startFpsCounter();
+      }
 
       final windowsId = await WindowsDeviceIdentity.getOrCreateDeviceId();
       _controlWs?.add(
         ControlMessage.sessionStart(
           sessionToken: token,
           windowsDeviceId: windowsId,
+          targetFps: 60,
+          bitrate: 6000000,
         ).toJsonString(),
       );
 
       _startHeartbeat();
-      _startFpsCounter();
     } catch (e) {
       _handleUnexpectedDrop('Không thể mở cổng stream $port: $e');
     }
@@ -448,9 +545,11 @@ class LanSessionClient {
     final w = payload['width'] as int?;
     final h = payload['height'] as int?;
     final rot = payload['rotation'] as int?;
+    final acc = payload['accessibilityEnabled'] as bool?;
     if (w != null && w > 0) _streamWidth = w;
     if (h != null && h > 0) _streamHeight = h;
     if (rot != null) _rotation = rot;
+    if (acc != null) _accessibilityEnabled = acc;
     _emit(
       status: _status == WindowsDeviceStatus.streaming
           ? WindowsDeviceStatus.streaming
@@ -502,6 +601,62 @@ class LanSessionClient {
     );
   }
 
+  void _startNativeStatsPolling() {
+    _nativeStatsTimer?.cancel();
+    _lastNativeDecodedFrames = 0;
+    _lastFpsSampleAt = DateTime.now();
+
+    _nativeStatsTimer = Timer.periodic(
+      const Duration(milliseconds: 250),
+      (_) async {
+        if (_manualStopping || _targetDevice == null) return;
+        final stats = await _decoder.getStreamStats();
+        if (_manualStopping || _targetDevice == null) return;
+
+        if (stats.ended) {
+          _handleUnexpectedDrop(
+            stats.error.isNotEmpty ? stats.error : 'Luồng video đã ngắt',
+          );
+          return;
+        }
+
+        final now = DateTime.now();
+        final prevSample = _lastFpsSampleAt;
+        var fpsUpdated = false;
+        if (prevSample != null) {
+          final elapsedMs = now.difference(prevSample).inMilliseconds;
+          if (elapsedMs >= 1000) {
+            final delta = stats.decodedFrames - _lastNativeDecodedFrames;
+            _currentFps = ((delta * 1000) / elapsedMs).round().clamp(0, 120);
+            _lastNativeDecodedFrames = stats.decodedFrames;
+            _lastFpsSampleAt = now;
+            fpsUpdated = true;
+          }
+        }
+
+        final dimsChanged = stats.width > 0 &&
+            stats.height > 0 &&
+            (_streamWidth != stats.width ||
+                _streamHeight != stats.height ||
+                _rotation != stats.rotation ||
+                _status != WindowsDeviceStatus.streaming);
+
+        if (dimsChanged) {
+          _streamWidth = stats.width;
+          _streamHeight = stats.height;
+          _rotation = stats.rotation;
+          _emit(
+            status: WindowsDeviceStatus.streaming,
+            statusMessage:
+                'Đang trình chiếu ${_targetDevice?.deviceName ?? ''} (${stats.width}×${stats.height})',
+          );
+        } else if (fpsUpdated && _status == WindowsDeviceStatus.streaming) {
+          _emit(status: WindowsDeviceStatus.streaming);
+        }
+      },
+    );
+  }
+
   void _startFpsCounter() {
     _fpsTimer?.cancel();
     _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -534,6 +689,10 @@ class LanSessionClient {
 
     _reconnecting = true;
     _heartbeatTimer?.cancel();
+    _nativeStatsTimer?.cancel();
+    try {
+      await _decoder.stopNativeStream();
+    } catch (_) {}
     await _wsSub?.cancel();
     _wsSub = null;
     try {
@@ -602,6 +761,7 @@ class LanSessionClient {
         streamHeight: _streamHeight,
         rotationQuarterTurns: _rotation,
         fps: _currentFps,
+        accessibilityEnabled: _accessibilityEnabled,
         errorMessage: errorMessage,
         statusMessage: statusMessage,
       ),

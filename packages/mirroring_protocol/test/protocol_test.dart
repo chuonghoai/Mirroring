@@ -74,6 +74,48 @@ void main() {
       expect(decodedRes.payload['streamPort'], 45456);
     });
 
+    test('roundtrips inputGesture, inputAction, inputText, and accessibilityStatus', () {
+      final token = 'a' * 40;
+      final gesture = ControlMessage.inputGesture(
+        sessionToken: token,
+        points: [
+          {'x': 0.25, 'y': 0.5},
+          {'x': 0.75, 'y': 0.5},
+        ],
+        durationMs: 180,
+      );
+      final parsedGesture = ControlMessage.tryParse(gesture.toJsonString());
+      expect(parsedGesture?.type, ControlMessageType.inputGesture);
+      expect(parsedGesture?.payload['durationMs'], 180);
+
+      final action = ControlMessage.inputAction(
+        sessionToken: token,
+        action: 'back',
+      );
+      expect(
+        ControlMessage.tryParse(action.toJsonString())?.payload['action'],
+        'back',
+      );
+
+      final text = ControlMessage.inputText(
+        sessionToken: token,
+        text: 'Xin chào Việt Nam',
+      );
+      expect(
+        ControlMessage.tryParse(text.toJsonString())?.payload['text'],
+        'Xin chào Việt Nam',
+      );
+
+      final acc = ControlMessage.accessibilityStatus(
+        sessionToken: token,
+        enabled: true,
+      );
+      expect(
+        ControlMessage.tryParse(acc.toJsonString())?.payload['enabled'],
+        isTrue,
+      );
+    });
+
     test('rejects unknown message type or wrong protocol version', () {
       expect(
         ControlMessage.tryParse(

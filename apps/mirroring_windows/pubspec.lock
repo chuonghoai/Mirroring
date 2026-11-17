@@ -145,7 +145,7 @@ packages:
       path: "../../packages/mirroring_protocol"
       relative: true
     source: path
-    version: "1.0.0"
+    version: "2.0.0"
   path:
     dependency: transitive
     description:

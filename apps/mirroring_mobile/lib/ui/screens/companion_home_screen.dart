@@ -59,6 +59,9 @@ class _CompanionHomeScreenState extends State<CompanionHomeScreen> {
                     const SizedBox(height: 14),
                   ],
 
+                  _buildAccessibilityCard(state),
+                  const SizedBox(height: 14),
+
                   if (state.pendingRequest != null) ...[
                     _buildIncomingRequestCard(state, state.pendingRequest!),
                     const SizedBox(height: 14),
@@ -222,6 +225,78 @@ class _CompanionHomeScreenState extends State<CompanionHomeScreen> {
             ),
             child: const Text('Cấp quyền', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccessibilityCard(CompanionAppState state) {
+    final enabled = state.accessibilityEnabled;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: enabled
+            ? const Color(0xFF064E3B).withValues(alpha: 0.35)
+            : const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: enabled
+              ? const Color(0xFF10B981).withValues(alpha: 0.5)
+              : const Color(0xFF334155),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            enabled ? Icons.touch_app_rounded : Icons.accessibility_new_rounded,
+            color: enabled ? const Color(0xFF34D399) : const Color(0xFF38BDF8),
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  enabled
+                      ? 'Điều khiển từ xa đã bật'
+                      : 'Bật điều khiển từ xa qua LAN',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  enabled
+                      ? 'Windows có thể chạm, cuộn, Back/Home và nhập chữ lên điện thoại.'
+                      : 'Cần bật "Mirroring Remote Control" trong Dịch vụ đã cài đặt (Trợ năng) để điều khiển từ Windows.',
+                  style: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 11.5,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!enabled) ...[
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: widget.controller.openAccessibilitySettings,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2563EB),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text('Bật ngay', style: TextStyle(fontSize: 12)),
+            ),
+          ],
         ],
       ),
     );

@@ -103,6 +103,7 @@ class CompanionAppState {
   final int reconnectSecondsLeft;
   final String? statusMessage;
   final bool hasNotificationPermission;
+  final bool accessibilityEnabled;
   final bool isResponding;
 
   const CompanionAppState({
@@ -122,6 +123,7 @@ class CompanionAppState {
     this.reconnectSecondsLeft = 0,
     this.statusMessage,
     this.hasNotificationPermission = true,
+    this.accessibilityEnabled = false,
     this.isResponding = false,
   });
 
@@ -150,6 +152,7 @@ class CompanionAppState {
     String? statusMessage,
     bool clearStatusMessage = false,
     bool? hasNotificationPermission,
+    bool? accessibilityEnabled,
     bool? isResponding,
   }) {
     return CompanionAppState(
@@ -178,6 +181,7 @@ class CompanionAppState {
           : (statusMessage ?? this.statusMessage),
       hasNotificationPermission:
           hasNotificationPermission ?? this.hasNotificationPermission,
+      accessibilityEnabled: accessibilityEnabled ?? this.accessibilityEnabled,
       isResponding: isResponding ?? this.isResponding,
     );
   }
@@ -217,6 +221,7 @@ class CompanionAppState {
       reconnectSecondsLeft: (map['reconnectSecondsLeft'] as int?) ?? 0,
       statusMessage: map['statusMessage'] as String?,
       hasNotificationPermission: hasNotificationPermission,
+      accessibilityEnabled: (map['accessibilityEnabled'] as bool?) ?? false,
       isResponding: isResponding,
     );
   }

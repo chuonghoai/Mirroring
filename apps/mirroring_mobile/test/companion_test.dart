@@ -86,6 +86,11 @@ class FakeMirroringBridge implements MirroringNativeBridge {
     calls.add('stopSession');
   }
 
+  @override
+  Future<void> openAccessibilitySettings() async {
+    calls.add('openAccessibilitySettings');
+  }
+
   void dispose() {
     _events.close();
   }
@@ -225,6 +230,10 @@ void main() {
       expect(find.text('Mirroring'), findsOneWidget);
       expect(find.text('Pixel 8 Test'), findsOneWidget);
       expect(find.text('DESKTOP-TEST'), findsOneWidget);
+      expect(find.text('Bật ngay'), findsOneWidget);
+
+      await tester.tap(find.text('Bật ngay'));
+      expect(bridge.calls, contains('openAccessibilitySettings'));
 
       final now = DateTime.now().millisecondsSinceEpoch;
       bridge.emitState({

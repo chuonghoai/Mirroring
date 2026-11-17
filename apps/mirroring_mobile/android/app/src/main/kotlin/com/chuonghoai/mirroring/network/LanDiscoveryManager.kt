@@ -7,6 +7,7 @@ import com.chuonghoai.mirroring.core.DeviceIdentity
 import org.json.JSONObject
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
@@ -65,9 +66,9 @@ class LanDiscoveryManager(
                 soTimeout = 1500
                 bind(InetSocketAddress(DISCOVERY_PORT))
             }
+            Log.i(TAG, "Listening for LAN UDP beacons on port $DISCOVERY_PORT")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to bind discovery UDP port $DISCOVERY_PORT: ${t.message}")
-            // Fallback to ephemeral socket for sending beacons if port is busy
             try {
                 socket = DatagramSocket().apply {
                     broadcast = true
@@ -147,33 +148,52 @@ class LanDiscoveryManager(
         }
     }
 
-    private fun sendBeaconOnce() {
-        val s = socket ?: return
+    private fun buildBeaconBytes(): ByteArray? {
         val port = controlPortProvider()
-        if (port <= 0) return
+        if (port <= 0) return null
+        val json = JSONObject().apply {
+            put("magic", MAGIC)
+            put("protocolVersion", PROTOCOL_VERSION)
+            put("deviceId", deviceId)
+            put("deviceName", DeviceIdentity.getDeviceName(context))
+            put("deviceType", "androidCompanion")
+            put("controlPort", port)
+            put("availability", availabilityProvider())
+            put("timestampMs", System.currentTimeMillis())
+        }
+        return json.toString().toByteArray(Charsets.UTF_8)
+    }
 
-        try {
-            val json = JSONObject().apply {
-                put("magic", MAGIC)
-                put("protocolVersion", PROTOCOL_VERSION)
-                put("deviceId", deviceId)
-                put("deviceName", DeviceIdentity.getDeviceName(context))
-                put("deviceType", "androidCompanion")
-                put("controlPort", port)
-                put("availability", availabilityProvider())
-                put("timestampMs", System.currentTimeMillis())
-            }
-            val bytes = json.toString().toByteArray(Charsets.UTF_8)
-            val targets = DeviceIdentity.getBroadcastAddresses()
-            for (addr in targets) {
-                try {
-                    val packet = DatagramPacket(bytes, bytes.size, addr, DISCOVERY_PORT)
-                    s.send(packet)
-                } catch (_: Throwable) {
-                }
-            }
+    private fun sendBeaconOnce(extraUnicastIp: String? = null) {
+        val s = socket ?: return
+        val bytes = try {
+            buildBeaconBytes()
         } catch (t: Throwable) {
             Log.w(TAG, "Error building discovery beacon: ${t.message}")
+            null
+        } ?: return
+
+        val targets = linkedSetOf<InetAddress>()
+        targets.addAll(DeviceIdentity.getBroadcastAddresses())
+        for (host in discoveredHosts.values) {
+            try {
+                targets.add(InetAddress.getByName(host.ipAddress))
+            } catch (_: Throwable) {
+            }
+        }
+        if (!extraUnicastIp.isNullOrBlank()) {
+            try {
+                targets.add(InetAddress.getByName(extraUnicastIp))
+            } catch (_: Throwable) {
+            }
+        }
+
+        for (addr in targets) {
+            try {
+                val packet = DatagramPacket(bytes, bytes.size, addr, DISCOVERY_PORT)
+                s.send(packet)
+            } catch (_: Throwable) {
+            }
         }
     }
 
@@ -217,7 +237,14 @@ class LanDiscoveryManager(
             previous.deviceName != host.deviceName ||
             previous.availability != host.availability
         ) {
+            Log.i(TAG, "Discovered Windows host: ${host.deviceName} at ${host.ipAddress} (${host.availability})")
             emitHosts()
+            if (previous == null) {
+                Thread({ sendBeaconOnce(senderIp) }, "MirroringUnicastEcho").apply {
+                    isDaemon = true
+                    start()
+                }
+            }
         }
     }
 
@@ -228,6 +255,7 @@ class LanDiscoveryManager(
         while (iterator.hasNext()) {
             val entry = iterator.next()
             if (now - entry.value.lastSeenAtMs > OFFLINE_TIMEOUT_MS) {
+                Log.i(TAG, "Pruned offline Windows host: ${entry.value.deviceName} (${entry.value.ipAddress})")
                 iterator.remove()
                 removed = true
             }

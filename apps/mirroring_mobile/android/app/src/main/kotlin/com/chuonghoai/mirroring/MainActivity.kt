@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.chuonghoai.mirroring.service.CompanionUiObserver
@@ -124,6 +125,20 @@ class MainActivity : FlutterActivity(), CompanionUiObserver {
                 result.success(true)
             }
 
+            "isAccessibilityEnabled" -> {
+                result.success(
+                    com.chuonghoai.mirroring.service.MirroringAccessibilityService.isServiceEnabled(this),
+                )
+            }
+
+            "openAccessibilitySettings" -> {
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+                result.success(true)
+            }
+
             else -> result.notImplemented()
         }
     }
@@ -142,6 +157,16 @@ class MainActivity : FlutterActivity(), CompanionUiObserver {
                 callback?.success(false)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        eventSink?.success(
+            mapOf(
+                "type" to "state",
+                "data" to MirroringSessionCoordinator.buildStateSnapshot(),
+            ),
+        )
     }
 
     override fun onDestroy() {

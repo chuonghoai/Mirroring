@@ -1,7 +1,7 @@
 name: mirroring_mobile
 description: "Mirroring Android Companion — LAN device discovery, session approval, and background MediaProjection screen streaming."
 publish_to: 'none'
-version: 1.0.1+1
+version: 2.0.0+2
 
 environment:
   sdk: ">=3.11.0 <4.0.0"

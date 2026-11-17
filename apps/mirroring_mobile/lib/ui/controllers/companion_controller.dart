@@ -132,6 +132,14 @@ class CompanionController extends ChangeNotifier {
     }
   }
 
+  Future<void> openAccessibilitySettings() async {
+    try {
+      await _bridge.openAccessibilitySettings();
+    } catch (e) {
+      _appendLog('Không thể mở Cài đặt Trợ năng: $e');
+    }
+  }
+
   void _onNativeEvent(Map<Object?, Object?> event) {
     final type = event['type'] as String?;
     if (type == 'state') {

@@ -3,7 +3,6 @@ package com.chuonghoai.mirroring.stream
 import android.util.Log
 import org.json.JSONObject
 import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
@@ -12,6 +11,8 @@ import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
+import java.util.concurrent.LinkedBlockingDeque
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class H264StreamServer(
@@ -24,6 +25,7 @@ class H264StreamServer(
         private const val TAG = "H264StreamServer"
         private const val STREAM_MAGIC = 0x4D525631 // 'MRV1'
         private const val HEADER_SIZE = 24
+        private const val MAX_QUEUED_FRAMES = 12
 
         const val FRAME_TYPE_CONFIG = 0
         const val FRAME_TYPE_KEY = 1
@@ -31,10 +33,24 @@ class H264StreamServer(
         const val FRAME_TYPE_METADATA = 3
     }
 
+    private data class OutboundPacket(
+        val frameType: Int,
+        val encodedBytes: ByteArray,
+    )
+
+    private data class CachedConfig(
+        val width: Int,
+        val height: Int,
+        val rotation: Int,
+        val payload: ByteArray,
+    )
+
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
     private var acceptThread: Thread? = null
+    private var senderThread: Thread? = null
 
+    private val sendQueue = LinkedBlockingDeque<OutboundPacket>(MAX_QUEUED_FRAMES)
     private val clientLock = Any()
     @Volatile
     private var clientSocket: Socket? = null
@@ -47,13 +63,6 @@ class H264StreamServer(
 
     @Volatile
     private var lastConfigFrame: CachedConfig? = null
-
-    private data class CachedConfig(
-        val width: Int,
-        val height: Int,
-        val rotation: Int,
-        val payload: ByteArray,
-    )
 
     fun start(): Int {
         if (running.get()) return listeningPort
@@ -76,6 +85,10 @@ class H264StreamServer(
             isDaemon = true
             start()
         }
+        senderThread = Thread({ senderLoop() }, "MirroringStreamSender").apply {
+            isDaemon = true
+            start()
+        }
         Log.i(TAG, "H264StreamServer listening on port $listeningPort")
         return listeningPort
     }
@@ -84,6 +97,7 @@ class H264StreamServer(
         if (!running.compareAndSet(true, false)) return
         listeningPort = 0
         lastConfigFrame = null
+        sendQueue.clear()
         closeActiveClient()
         try {
             serverSocket?.close()
@@ -91,7 +105,9 @@ class H264StreamServer(
         }
         serverSocket = null
         acceptThread?.interrupt()
+        senderThread?.interrupt()
         acceptThread = null
+        senderThread = null
     }
 
     fun closeActiveClient() {
@@ -103,6 +119,7 @@ class H264StreamServer(
             clientSocket = null
             clientOutput = null
         }
+        sendQueue.clear()
     }
 
     fun sendFrame(
@@ -116,10 +133,11 @@ class H264StreamServer(
         if (frameType == FRAME_TYPE_CONFIG) {
             lastConfigFrame = CachedConfig(width, height, rotationQuarterTurns, payload.copyOf())
         }
+        if (clientOutput == null) return
 
-        val out = synchronized(clientLock) { clientOutput } ?: return
-        try {
-            val header = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.BIG_ENDIAN).apply {
+        val packetBytes = ByteBuffer.allocate(HEADER_SIZE + payload.size)
+            .order(ByteOrder.BIG_ENDIAN)
+            .apply {
                 putInt(STREAM_MAGIC)
                 put(frameType.toByte())
                 put((rotationQuarterTurns and 0x03).toByte())
@@ -128,18 +146,42 @@ class H264StreamServer(
                 putShort(0)
                 putLong(timestampUs)
                 putInt(payload.size)
+                put(payload)
             }.array()
 
-            synchronized(clientLock) {
-                val activeOut = clientOutput ?: return
-                activeOut.write(header)
-                activeOut.write(payload)
-                activeOut.flush()
+        val packet = OutboundPacket(frameType, packetBytes)
+        if (!sendQueue.offerLast(packet)) {
+            if (frameType == FRAME_TYPE_CONFIG || frameType == FRAME_TYPE_KEY) {
+                // Make space by dropping older queued delta frames so keyframe/config go through.
+                sendQueue.removeIf { it.frameType == FRAME_TYPE_DELTA }
+                if (!sendQueue.offerLast(packet)) {
+                    sendQueue.pollFirst()
+                    sendQueue.offerLast(packet)
+                }
             }
-        } catch (t: Throwable) {
-            Log.w(TAG, "Stream write failed: ${t.message}")
-            closeActiveClient()
-            onClientStreamLost(t.message ?: "Stream write error")
+            // If queue is full on a delta frame, skip enqueueing to avoid unbounded latency buildup.
+        }
+    }
+
+    private fun senderLoop() {
+        while (running.get()) {
+            try {
+                val packet = sendQueue.pollFirst(200, TimeUnit.MILLISECONDS) ?: continue
+                val out = synchronized(clientLock) { clientOutput } ?: continue
+                out.write(packet.encodedBytes)
+                // Only flush when the queue is drained so burst frames coalesce cleanly.
+                if (sendQueue.isEmpty()) {
+                    out.flush()
+                }
+            } catch (_: InterruptedException) {
+                if (!running.get()) break
+            } catch (t: Throwable) {
+                if (running.get() && clientOutput != null) {
+                    Log.w(TAG, "Stream write failed: ${t.message}")
+                    closeActiveClient()
+                    onClientStreamLost(t.message ?: "Stream write error")
+                }
+            }
         }
     }
 
@@ -149,7 +191,7 @@ class H264StreamServer(
             try {
                 val socket = ss.accept()
                 socket.tcpNoDelay = true
-                socket.sendBufferSize = 256 * 1024
+                socket.sendBufferSize = 512 * 1024
                 Thread({ handleClientConnection(socket) }, "MirroringStreamAuth").apply {
                     isDaemon = true
                     start()
@@ -192,23 +234,22 @@ class H264StreamServer(
             }
 
             socket.soTimeout = 0
-            val out = BufferedOutputStream(socket.getOutputStream(), 65536)
-            out.write("{\"accepted\":true}\n".toByteArray(Charsets.UTF_8))
-            out.flush()
+            val rawOut = socket.getOutputStream()
+            rawOut.write("{\"accepted\":true}\n".toByteArray(Charsets.UTF_8))
+            rawOut.flush()
 
             synchronized(clientLock) {
-                // Replace any stale stream socket
                 try {
                     clientSocket?.close()
                 } catch (_: Throwable) {
                 }
+                sendQueue.clear()
                 clientSocket = socket
-                clientOutput = out
+                clientOutput = rawOut
             }
 
             Log.i(TAG, "Authenticated stream client connected from ${socket.inetAddress?.hostAddress}")
 
-            // Immediately push cached SPS/PPS config if present, then request IDR keyframe
             lastConfigFrame?.let { cfg ->
                 sendFrame(
                     frameType = FRAME_TYPE_CONFIG,

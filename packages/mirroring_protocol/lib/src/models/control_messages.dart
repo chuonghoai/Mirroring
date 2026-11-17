@@ -13,6 +13,10 @@ enum ControlMessageType {
   sessionStop,
   streamConfig,
   clipboardPush,
+  inputGesture,
+  inputAction,
+  inputText,
+  accessibilityStatus,
   error;
 
   static ControlMessageType? fromWire(String? raw) {
@@ -149,6 +153,7 @@ class ControlMessage {
     required int height,
     required int rotation,
     required int streamPort,
+    bool accessibilityEnabled = false,
   }) {
     return ControlMessage(
       type: ControlMessageType.sessionAck,
@@ -158,6 +163,7 @@ class ControlMessage {
         'height': height,
         'rotation': rotation,
         'streamPort': streamPort,
+        'accessibilityEnabled': accessibilityEnabled,
       },
     );
   }
@@ -231,6 +237,63 @@ class ControlMessage {
       payload: {
         'sessionToken': sessionToken,
         'text': text,
+      },
+    );
+  }
+
+  /// Dispatches a touch tap, swipe, or scroll gesture with normalized [0..1] points.
+  factory ControlMessage.inputGesture({
+    required String sessionToken,
+    required List<Map<String, double>> points,
+    required int durationMs,
+  }) {
+    return ControlMessage(
+      type: ControlMessageType.inputGesture,
+      payload: {
+        'sessionToken': sessionToken,
+        'points': points,
+        'durationMs': durationMs,
+      },
+    );
+  }
+
+  /// Triggers navigation or key actions: back, home, recents, notifications, backspace, enter.
+  factory ControlMessage.inputAction({
+    required String sessionToken,
+    required String action,
+  }) {
+    return ControlMessage(
+      type: ControlMessageType.inputAction,
+      payload: {
+        'sessionToken': sessionToken,
+        'action': action,
+      },
+    );
+  }
+
+  /// Sends UTF-8 text to the currently focused input field on Android.
+  factory ControlMessage.inputText({
+    required String sessionToken,
+    required String text,
+  }) {
+    return ControlMessage(
+      type: ControlMessageType.inputText,
+      payload: {
+        'sessionToken': sessionToken,
+        'text': text,
+      },
+    );
+  }
+
+  factory ControlMessage.accessibilityStatus({
+    required String sessionToken,
+    required bool enabled,
+  }) {
+    return ControlMessage(
+      type: ControlMessageType.accessibilityStatus,
+      payload: {
+        'sessionToken': sessionToken,
+        'enabled': enabled,
       },
     );
   }

@@ -8,6 +8,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include <memory>
+#include <string>
 
 #include "h264_video_decoder.h"
 #include "win32_window.h"
@@ -34,6 +35,9 @@ class FlutterWindow : public Win32Window {
   void HandleLifecycleCall(
       const flutter::MethodCall<flutter::EncodableValue>& call,
       std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result);
+  void EnterViewerWindowMode(int stream_width, int stream_height,
+                             const std::string& title);
+  void ExitViewerWindowMode();
 
   flutter::DartProject project_;
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
@@ -43,6 +47,10 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       lifecycle_channel_;
   std::unique_ptr<H264VideoDecoder> video_decoder_;
+
+  bool in_viewer_mode_ = false;
+  bool has_saved_controller_rect_ = false;
+  RECT saved_controller_rect_{};
 
   bool close_requested_ = false;
   bool close_confirmed_ = false;

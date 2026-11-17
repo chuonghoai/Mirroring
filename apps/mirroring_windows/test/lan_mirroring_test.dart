@@ -12,7 +12,7 @@ import 'package:mirroring/ui/controllers/mirroring_controller.dart';
 import 'package:mirroring/ui/screens/home_screen.dart';
 import 'package:mirroring_protocol/mirroring_protocol.dart';
 
-class FakeVideoDecoderBackend implements VideoDecoderBackend {
+class FakeVideoDecoderBackend extends VideoDecoderBackend {
   int createdCount = 0;
   int decodedFrames = 0;
   int resetCount = 0;
@@ -123,6 +123,9 @@ void main() {
       final token = 'TestSessionToken_0123456789abcdef0123456789';
       final receivedControlTypes = <ControlMessageType>[];
       String? receivedClipboard;
+      String? receivedInputAction;
+      String? receivedInputText;
+      List<dynamic>? receivedGesturePoints;
       String? receivedStopReason;
       final sessionStoppedCompleter = Completer<void>();
 
@@ -195,11 +198,21 @@ void main() {
                   height: 1280,
                   rotation: 0,
                   streamPort: streamServer.port,
+                  accessibilityEnabled: true,
                 ).toJsonString(),
               );
               break;
             case ControlMessageType.clipboardPush:
               receivedClipboard = msg.payload['text'] as String?;
+              break;
+            case ControlMessageType.inputGesture:
+              receivedGesturePoints = msg.payload['points'] as List<dynamic>?;
+              break;
+            case ControlMessageType.inputAction:
+              receivedInputAction = msg.payload['action'] as String?;
+              break;
+            case ControlMessageType.inputText:
+              receivedInputText = msg.payload['text'] as String?;
               break;
             case ControlMessageType.sessionStop:
               receivedStopReason = msg.payload['reason'] as String?;
@@ -253,10 +266,25 @@ void main() {
       final pushed = await client.pushClipboard('Hello Android');
       expect(pushed, isTrue);
 
+      expect(
+        client.sendTouchGesture(
+          points: [
+            {'x': 0.5, 'y': 0.5},
+          ],
+          durationMs: 45,
+        ),
+        isTrue,
+      );
+      expect(client.sendInputAction('back'), isTrue);
+      expect(client.sendInputText('Xin chào'), isTrue);
+
       await client.stopSession(reason: 'Test stop', notifyPeer: true);
       await sessionStoppedCompleter.future.timeout(const Duration(seconds: 3));
 
       expect(receivedClipboard, 'Hello Android');
+      expect(receivedGesturePoints?.length, 1);
+      expect(receivedInputAction, 'back');
+      expect(receivedInputText, 'Xin chào');
       expect(receivedStopReason, 'Test stop');
       expect(receivedControlTypes, contains(ControlMessageType.pairRequest));
       expect(receivedControlTypes, contains(ControlMessageType.sessionStart));

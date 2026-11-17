@@ -23,8 +23,8 @@ class ScreenCaptureEncoder(
     private val context: Context,
     private val mediaProjection: MediaProjection,
     private val maxDimension: Int = 1280,
-    private val targetFps: Int = 30,
-    private val bitrate: Int = 4_000_000,
+    private val targetFps: Int = 60,
+    private val bitrate: Int = 6_000_000,
     private val listener: Listener,
 ) {
     interface Listener {
@@ -234,9 +234,14 @@ class ScreenCaptureEncoder(
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, targetFps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-            setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000L)
+            setInteger(MediaFormat.KEY_PRIORITY, 0) // Realtime encoding priority
+            setInteger(MediaFormat.KEY_OPERATING_RATE, targetFps)
+            setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 33_333L)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setInteger(MediaFormat.KEY_LATENCY, 0)
             }
             // Prefer Baseline profile so there is zero B-frame reordering latency
             setInteger(
@@ -253,7 +258,7 @@ class ScreenCaptureEncoder(
         try {
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         } catch (_: Throwable) {
-            // Fallback without explicit profile/level if device encoder rejects Baseline+Level4
+            // Fallback without optional/vendor keys if encoder rejects any hint
             val fallback = MediaFormat.createVideoFormat(MIME_AVC, width, height).apply {
                 setInteger(
                     MediaFormat.KEY_COLOR_FORMAT,
@@ -262,7 +267,7 @@ class ScreenCaptureEncoder(
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, targetFps)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-                setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000L)
+                setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 33_333L)
             }
             codec.configure(fallback, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         }
@@ -312,7 +317,7 @@ class ScreenCaptureEncoder(
             }
 
             try {
-                val outIndex = codec.dequeueOutputBuffer(info, 25_000L)
+                val outIndex = codec.dequeueOutputBuffer(info, 10_000L)
                 when {
                     outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         val newFormat = codec.outputFormat
@@ -342,38 +347,45 @@ class ScreenCaptureEncoder(
 
                     outIndex >= 0 -> {
                         val outBuf = codec.getOutputBuffer(outIndex)
+                        var copiedData: ByteArray? = null
+                        val flags = info.flags
+                        val ptsUs = info.presentationTimeUs
                         if (outBuf != null && info.size > 0) {
                             outBuf.position(info.offset)
                             outBuf.limit(info.offset + info.size)
-                            val data = ByteArray(info.size)
-                            outBuf.get(data)
+                            copiedData = ByteArray(info.size)
+                            outBuf.get(copiedData)
+                        }
+                        // Release output buffer immediately so MediaCodec never stalls waiting for network I/O.
+                        codec.releaseOutputBuffer(outIndex, false)
 
-                            val isConfig = (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
-                            val isKey = (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
+                        if (copiedData != null) {
+                            val isConfig = (flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                            val isKey = (flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
 
                             if (isConfig) {
-                                cachedConfigBytes = data
+                                cachedConfigBytes = copiedData
                                 listener.onVideoFrame(
                                     frameType = H264StreamServer.FRAME_TYPE_CONFIG,
                                     rotationQuarterTurns = currentRotation,
                                     width = currentWidth,
                                     height = currentHeight,
-                                    timestampUs = info.presentationTimeUs,
-                                    payload = data,
+                                    timestampUs = ptsUs,
+                                    payload = copiedData,
                                 )
                             } else if (isKey) {
                                 val cfg = cachedConfigBytes
-                                val framePayload = if (cfg != null && !startsWithSps(data)) {
-                                    cfg + data
+                                val framePayload = if (cfg != null && !startsWithSps(copiedData)) {
+                                    cfg + copiedData
                                 } else {
-                                    data
+                                    copiedData
                                 }
                                 listener.onVideoFrame(
                                     frameType = H264StreamServer.FRAME_TYPE_KEY,
                                     rotationQuarterTurns = currentRotation,
                                     width = currentWidth,
                                     height = currentHeight,
-                                    timestampUs = info.presentationTimeUs,
+                                    timestampUs = ptsUs,
                                     payload = framePayload,
                                 )
                             } else {
@@ -382,12 +394,11 @@ class ScreenCaptureEncoder(
                                     rotationQuarterTurns = currentRotation,
                                     width = currentWidth,
                                     height = currentHeight,
-                                    timestampUs = info.presentationTimeUs,
-                                    payload = data,
+                                    timestampUs = ptsUs,
+                                    payload = copiedData,
                                 )
                             }
                         }
-                        codec.releaseOutputBuffer(outIndex, false)
                     }
                 }
             } catch (t: Throwable) {

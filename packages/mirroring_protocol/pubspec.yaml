@@ -1,6 +1,6 @@
 name: mirroring_protocol
 description: Shared LAN discovery, control, security, and video stream framing protocol for Mirroring Windows and Android Companion.
-version: 1.0.0
+version: 2.0.0
 publish_to: none
 
 environment:

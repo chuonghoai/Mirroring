@@ -12,6 +12,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.security.MessageDigest
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -34,7 +35,9 @@ class ControlWebSocketServer(
         private val outputStream: OutputStream,
     ) {
         private val closed = AtomicBoolean(false)
-        private val writeLock = Any()
+        private val writeExecutor = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "MirroringWsWrite").apply { isDaemon = true }
+        }
 
         val isOpen: Boolean get() = !closed.get() && !socket.isClosed
 
@@ -43,43 +46,75 @@ class ControlWebSocketServer(
         fun sendText(text: String): Boolean {
             if (closed.get()) return false
             val payload = text.toByteArray(Charsets.UTF_8)
-            return sendFrame(opcode = 0x1, payload = payload)
+            return sendFrameAsync(opcode = 0x1, payload = payload)
         }
 
         fun sendPong(payload: ByteArray) {
             if (closed.get()) return
-            sendFrame(opcode = 0xA, payload = payload)
+            sendFrameAsync(opcode = 0xA, payload = payload)
         }
 
-        private fun sendFrame(opcode: Int, payload: ByteArray): Boolean {
-            synchronized(writeLock) {
-                if (closed.get()) return false
-                return try {
-                    val header = ByteArrayOutputStream()
-                    header.write(0x80 or (opcode and 0x0F))
-                    val len = payload.size
-                    when {
-                        len <= 125 -> header.write(len)
-                        len <= 65535 -> {
-                            header.write(126)
-                            header.write((len shr 8) and 0xFF)
-                            header.write(len and 0xFF)
-                        }
-                        else -> {
-                            header.write(127)
-                            for (shift in 56 downTo 0 step 8) {
-                                header.write(((len.toLong() shr shift) and 0xFF).toInt())
-                            }
+        fun sendJsonAndClose(json: JSONObject) {
+            if (closed.get()) {
+                close()
+                return
+            }
+            val payload = json.toString().toByteArray(Charsets.UTF_8)
+            try {
+                writeExecutor.execute {
+                    try {
+                        writeFrameSync(opcode = 0x1, payload = payload)
+                    } finally {
+                        close()
+                    }
+                }
+            } catch (_: Throwable) {
+                close()
+            }
+        }
+
+        private fun sendFrameAsync(opcode: Int, payload: ByteArray): Boolean {
+            if (closed.get()) return false
+            return try {
+                writeExecutor.execute {
+                    writeFrameSync(opcode, payload)
+                }
+                true
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to enqueue WS frame: ${t.message}")
+                close()
+                false
+            }
+        }
+
+        private fun writeFrameSync(opcode: Int, payload: ByteArray): Boolean {
+            if (closed.get()) return false
+            return try {
+                val header = ByteArrayOutputStream()
+                header.write(0x80 or (opcode and 0x0F))
+                val len = payload.size
+                when {
+                    len <= 125 -> header.write(len)
+                    len <= 65535 -> {
+                        header.write(126)
+                        header.write((len shr 8) and 0xFF)
+                        header.write(len and 0xFF)
+                    }
+                    else -> {
+                        header.write(127)
+                        for (shift in 56 downTo 0 step 8) {
+                            header.write(((len.toLong() shr shift) and 0xFF).toInt())
                         }
                     }
-                    outputStream.write(header.toByteArray())
-                    outputStream.write(payload)
-                    outputStream.flush()
-                    true
-                } catch (_: Throwable) {
-                    close()
-                    false
                 }
+                outputStream.write(header.toByteArray())
+                outputStream.write(payload)
+                outputStream.flush()
+                true
+            } catch (t: Throwable) {
+                Log.w(TAG, "WS write error: ${t.message}")
+                close()
+                false
             }
         }
 
@@ -87,6 +122,10 @@ class ControlWebSocketServer(
             if (!closed.compareAndSet(false, true)) return
             try {
                 socket.close()
+            } catch (_: Throwable) {
+            }
+            try {
+                writeExecutor.shutdown()
             } catch (_: Throwable) {
             }
         }

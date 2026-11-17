@@ -14,6 +14,7 @@ abstract class MirroringNativeBridge {
   });
   Future<bool> requestMediaProjectionAndStart();
   Future<void> stopSession({String? reason});
+  Future<void> openAccessibilitySettings();
 }
 
 class MethodChannelMirroringBridge implements MirroringNativeBridge {
@@ -72,5 +73,10 @@ class MethodChannelMirroringBridge implements MirroringNativeBridge {
     await _method.invokeMethod<void>('stopSession', {
       'reason': ?reason,
     });
+  }
+
+  @override
+  Future<void> openAccessibilitySettings() async {
+    await _method.invokeMethod<void>('openAccessibilitySettings');
   }
 }

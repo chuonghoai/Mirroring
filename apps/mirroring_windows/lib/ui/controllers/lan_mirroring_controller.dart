@@ -35,6 +35,9 @@ class LanMirroringController extends ChangeNotifier {
   int _fps = 0;
   int get fps => _fps;
 
+  bool _accessibilityEnabled = false;
+  bool get accessibilityEnabled => _accessibilityEnabled;
+
   String? _statusMessage;
   String? get statusMessage => _statusMessage;
 
@@ -44,6 +47,8 @@ class LanMirroringController extends ChangeNotifier {
   bool _isViewerVisible = false;
   bool get isViewerVisible => _isViewerVisible;
 
+  int _lastSizedWidth = 0;
+  int _lastSizedHeight = 0;
   bool _disposed = false;
 
   LanMirroringController({
@@ -65,7 +70,9 @@ class LanMirroringController extends ChangeNotifier {
     );
 
     _lifecycleChannel.setMethodCallHandler((call) async {
-      if (call.method == 'onWindowCloseRequested') {
+      if (call.method == 'onViewerCloseRequested') {
+        await stopSession();
+      } else if (call.method == 'onWindowCloseRequested') {
         await cleanup();
         try {
           await _lifecycleChannel.invokeMethod<void>('confirmClose');
@@ -124,6 +131,7 @@ class LanMirroringController extends ChangeNotifier {
 
   Future<void> stopSession() async {
     _isViewerVisible = false;
+    await _exitViewerWindowMode();
     await _sessionClient.stopSession(
       reason: 'Người dùng trên Windows đã dừng trình chiếu',
       notifyPeer: true,
@@ -133,12 +141,14 @@ class LanMirroringController extends ChangeNotifier {
   void showViewer() {
     if (_textureId != null && isStreamingOrConnected) {
       _isViewerVisible = true;
+      unawaited(_enterViewerWindowMode(forceResize: true));
       notifyListeners();
     }
   }
 
   void hideViewerToDeviceList() {
     _isViewerVisible = false;
+    unawaited(_exitViewerWindowMode());
     notifyListeners();
   }
 
@@ -164,6 +174,50 @@ class LanMirroringController extends ChangeNotifier {
     }
   }
 
+  bool sendTouchGesture({
+    required List<Map<String, double>> points,
+    required int durationMs,
+  }) {
+    return _sessionClient.sendTouchGesture(
+      points: points,
+      durationMs: durationMs,
+    );
+  }
+
+  bool sendInputAction(String action) {
+    return _sessionClient.sendInputAction(action);
+  }
+
+  bool sendInputText(String text) {
+    return _sessionClient.sendInputText(text);
+  }
+
+  Future<void> _enterViewerWindowMode({bool forceResize = false}) async {
+    final w = _streamWidth > 0 ? _streamWidth : 720;
+    final h = _streamHeight > 0 ? _streamHeight : 1280;
+    if (!forceResize && _lastSizedWidth == w && _lastSizedHeight == h) {
+      return;
+    }
+    _lastSizedWidth = w;
+    _lastSizedHeight = h;
+    final deviceName = activeDevice?.deviceName ?? 'Android';
+    try {
+      await _lifecycleChannel.invokeMethod<void>('enterViewerMode', {
+        'streamWidth': w,
+        'streamHeight': h,
+        'title': 'Mirroring - $deviceName',
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _exitViewerWindowMode() async {
+    _lastSizedWidth = 0;
+    _lastSizedHeight = 0;
+    try {
+      await _lifecycleChannel.invokeMethod<void>('exitViewerMode');
+    } catch (_) {}
+  }
+
   List<DiscoveredDevice> _mergeActiveDeviceStatus(List<DiscoveredDevice> list) {
     final activeId = _activeDeviceId;
     if (activeId == null) return list;
@@ -182,21 +236,29 @@ class LanMirroringController extends ChangeNotifier {
   void _onSessionUpdate(LanSessionUpdate update) {
     if (_disposed) return;
 
+    final wasViewerVisible = _isViewerVisible;
     _activeDeviceId = update.deviceId;
     _sessionStatus = update.status;
     _textureId = update.textureId;
     _streamWidth = update.streamWidth;
     _streamHeight = update.streamHeight;
     _fps = update.fps;
+    _accessibilityEnabled = update.accessibilityEnabled;
     _errorMessage = update.errorMessage;
     _statusMessage = update.statusMessage;
 
     if (update.status == WindowsDeviceStatus.streaming &&
         update.textureId != null) {
       _isViewerVisible = true;
+      unawaited(
+        _enterViewerWindowMode(forceResize: !wasViewerVisible),
+      );
     } else if (update.status == WindowsDeviceStatus.disconnected ||
         update.status == WindowsDeviceStatus.connectionFailed) {
       _isViewerVisible = false;
+      if (wasViewerVisible) {
+        unawaited(_exitViewerWindowMode());
+      }
     }
 
     _discoveryService.updateDeviceStatus(

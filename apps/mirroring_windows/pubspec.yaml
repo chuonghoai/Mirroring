@@ -2,7 +2,7 @@ name: mirroring
 description: "Ứng dụng điều khiển và phản chiếu màn hình điện thoại Android không dây trên Windows qua ADB và scrcpy."
 publish_to: 'none'
 
-version: 1.0.1+1
+version: 2.0.0+2
 
 environment:
   sdk: ">=3.11.0 <4.0.0"
