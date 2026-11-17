@@ -3,15 +3,18 @@
     {
       "name": "Win32",
       "includePath": [
-        "${workspaceFolder}/**",
-        "${workspaceFolder}/windows/runner",
-        "${workspaceFolder}/windows/flutter/ephemeral",
-        "${workspaceFolder}/windows/flutter/ephemeral/cpp_client_wrapper/include"
+        "${workspaceFolder}/apps/mirroring_windows/**",
+        "${workspaceFolder}/apps/mirroring_windows/windows",
+        "${workspaceFolder}/apps/mirroring_windows/windows/runner",
+        "${workspaceFolder}/apps/mirroring_windows/windows/flutter/ephemeral",
+        "${workspaceFolder}/apps/mirroring_windows/windows/flutter/ephemeral/cpp_client_wrapper/include",
+        "${workspaceFolder}/apps/mirroring_windows/windows/flutter/ephemeral/cpp_client_wrapper"
       ],
       "defines": [
         "_DEBUG",
         "UNICODE",
-        "_UNICODE"
+        "_UNICODE",
+        "NOMINMAX"
       ],
       "cStandard": "c17",
       "cppStandard": "c++17",
@@ -20,4 +23,3 @@
   ],
   "version": 4
 }
-

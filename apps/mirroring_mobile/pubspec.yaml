@@ -1,0 +1,25 @@
+name: mirroring_mobile
+description: "Mirroring Android Companion — LAN device discovery, session approval, and background MediaProjection screen streaming."
+publish_to: 'none'
+version: 1.0.1+1
+
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  mirroring_protocol:
+    path: ../../packages/mirroring_protocol
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/app_icon.jpg
+    - pubspec.yaml
